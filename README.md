@@ -122,3 +122,6 @@ All hyperparameters are centralized in the `CONFIG` dictionary:
 
 ## Change History
 - 2025-07-16: Initial commit with DynVelocity v15 training pipeline
+
+## Future plans
+[ ] add loss support for pot_partial_ot and pot_fugw
