@@ -13,10 +13,11 @@
 *.tsv
 *.xlsx
 
-# Logs
+# Logs and outputs
 *.log
 logs/
 wandb/
+outputs/
 
 # Python
 __pycache__/
