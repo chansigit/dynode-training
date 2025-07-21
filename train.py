@@ -6,6 +6,8 @@ Evaluates model every few epochs during training using Coverage + Gromov-Wassers
 
 import os, time, math, datetime, copy, pickle, sys, logging
 from math import sqrt
+from omegaconf import DictConfig, OmegaConf
+import hydra
 
 import numpy as np, pandas as pd, matplotlib.pyplot as plt
 import scanpy as sc, anndata, torch, wandb
@@ -24,6 +26,7 @@ sys.path.append('/scratch/users/chensj16/codes/dynode_development')
 # CONFIGURATION
 # ================================================================================================
 
+# Default configuration (will be overridden by Hydra)
 CONFIG = {
     # Paths
     'save_path': '/scratch/users/chensj16/codes/dynode_training/mouse-data-tmp/',
@@ -115,6 +118,107 @@ CONFIG = {
     'clip_grad_norm': 20.0,  # Gradient norm clipping threshold
     'clip_start_epoch': 100,  # Start clipping after this epoch (default 100)
 }
+
+def update_config_from_hydra(cfg: DictConfig) -> dict:
+    """Update CONFIG dictionary with values from Hydra configuration."""
+    global CONFIG
+    
+    # Create updated config from Hydra
+    updated_config = {
+        # Paths
+        'save_path': cfg.paths.save_path,
+        'data_path': cfg.paths.data_path,
+        'log_path': cfg.paths.log_path,
+        
+        # Data keys
+        'latent_key': cfg.data.latent_key,
+        'position_key': cfg.data.position_key,
+        'celltype_key': cfg.data.celltype_key,
+        
+        # Device
+        'device': cfg.device,
+        
+        # Model architecture
+        'input_dim': cfg.model.input_dim,
+        'output_dim': cfg.model.output_dim,
+        'hidden_dim': cfg.model.hidden_dim,
+        'position_dim': cfg.model.position_dim,
+        'sigma': cfg.model.sigma,
+        'static_pos': cfg.model.static_pos,
+        'message_passing': cfg.model.message_passing,
+        'expr_autonomous': cfg.model.expr_autonomous,
+        'pos_autonomous': cfg.model.pos_autonomous,
+        'energy_regularization': cfg.model.energy_regularization,
+        
+        # Training
+        'n_epochs': cfg.training.n_epochs,
+        'lr': cfg.training.lr,
+        'weight_decay': cfg.training.weight_decay,
+        'mini_batch_size': cfg.training.mini_batch_size,
+        'expr_alpha': cfg.training.expr_alpha,
+        'energy_lambda': cfg.training.energy_lambda,
+        
+        # Learning rate scheduling
+        'lr_schedule': dict(cfg.training.lr_schedule) if cfg.training.lr_schedule else None,
+        
+        # Loss configuration
+        'loss_method': cfg.loss.method,
+        'geomloss_blur': cfg.loss.geomloss_blur,
+        'geomloss_scaling': cfg.loss.geomloss_scaling,
+        'geomloss_reach': cfg.loss.geomloss_reach,
+        'sinkhorn_reg': cfg.loss.sinkhorn_reg,
+        'fgw_alpha': cfg.loss.fgw_alpha,
+        'fgw_eps': cfg.loss.fgw_eps,
+        'ot_max_iter': cfg.loss.ot_max_iter,
+        
+        # Unbalanced Sinkhorn parameters
+        'unbalanced_reg_m': cfg.loss.unbalanced_reg_m,
+        'unbalanced_reg_div': cfg.loss.unbalanced_reg_div,
+        
+        # Training schedule
+        'coarse_epochs': cfg.schedule.coarse_epochs,
+        'coarse_step_size': cfg.schedule.coarse_step_size,
+        'fine_step_size': cfg.schedule.fine_step_size,
+        'ode_method': cfg.schedule.ode_method,
+        
+        # Logging and checkpointing
+        'use_wandb': cfg.logging.use_wandb,
+        'wandb_project': cfg.logging.wandb_project,
+        'save_every': cfg.logging.save_every,
+        'print_every': cfg.logging.print_every,
+        'print_step_loss': cfg.logging.print_step_loss,
+        
+        # Debug mode
+        'debug_mode': cfg.debug_mode,
+        
+        # Evaluation settings
+        'enable_eval': cfg.evaluation.enable_eval,
+        'eval_every': cfg.evaluation.eval_every,
+        'eval_timepoints': cfg.evaluation.eval_timepoints,
+        'eval_samples': cfg.evaluation.eval_samples,
+        'eval_integration_method': cfg.evaluation.eval_integration_method,
+        'eval_step_size': cfg.evaluation.eval_step_size,
+        'radius_neighbors': cfg.evaluation.radius_neighbors,
+        
+        # Evaluation metrics control
+        'eval_coverage': cfg.evaluation.eval_coverage,
+        'eval_gw': cfg.evaluation.eval_gw,
+        'eval_label_consistency': cfg.evaluation.eval_label_consistency,
+        'max_gw_samples': cfg.evaluation.max_gw_samples,
+        'label_knn_k': cfg.evaluation.label_knn_k,
+        
+        # Training plans
+        'train_plans': cfg.train_plans,
+        
+        # Gradient clipping
+        'gradient_clipping': cfg.gradient_clipping.enabled,
+        'clip_grad_norm': cfg.gradient_clipping.clip_grad_norm,
+        'clip_start_epoch': cfg.gradient_clipping.clip_start_epoch,
+    }
+    
+    # Update global CONFIG
+    CONFIG.update(updated_config)
+    return CONFIG
 
 # ================================================================================================
 # UTILITIES
@@ -560,7 +664,7 @@ def evaluate_model(model, data, config, static_radius, logger):
         # 3. Label consistency (optional)
         if config['eval_label_consistency']:
             t_start = time.time()
-            # GPU-accelerated kNN search
+            # GPU-accelerated kNN search (keep the fast part)
             z_pred_torch = torch.from_numpy(z_pred).to(config['device'])
             z_true_torch = torch.from_numpy(z_true).to(config['device'])
             
@@ -796,8 +900,12 @@ def train_step(model, optimizer, data, config, loss_fn, logger, epoch):
 # MAIN TRAINING LOOP
 # ================================================================================================
 
-def main():
+@hydra.main(version_base=None, config_path=".", config_name="config")
+def main(cfg: DictConfig):
     """Main training function with integrated evaluation."""
+    # Update CONFIG with Hydra configuration
+    update_config_from_hydra(cfg)
+    
     # Record startup time
     startup_start_time = time.time()
     

@@ -1,0 +1,103 @@
+# DynVelocity Training Configuration
+
+# Paths
+paths:
+  save_path: "/scratch/users/chensj16/codes/dynode_training/mouse-data-tmp/"
+  data_path: "/oak/stanford/groups/xiaojie/chensj16/analysis-proj/dynode-training/mm-heart-merfish-v6/adata_list.v250715.pt"
+  log_path: "./logs/train_v15.log"
+
+# Data keys
+data:
+  latent_key: "Z_mean"  # Key in adata.obsm for latent embeddings
+  position_key: "std_3D"  # Key in adata.obsm for position coordinates
+  celltype_key: "CombinedCellType"  # Key in adata.obs for cell type labels
+
+# Device
+device: "cuda:0"
+
+# Model architecture
+model:
+  input_dim: 30
+  output_dim: 30
+  hidden_dim: 512
+  position_dim: 3
+  sigma: 100.0
+  static_pos: false
+  message_passing: true
+  expr_autonomous: false
+  pos_autonomous: false
+  energy_regularization: true
+
+# Training parameters
+training:
+  n_epochs: 5000
+  lr: 1.0e-8
+  weight_decay: 1.0e-4
+  mini_batch_size: 1024
+  expr_alpha: 0.75
+  energy_lambda: 0
+
+  # Learning rate scheduling
+  lr_schedule:
+    10: 1.0e-6
+    20: 5.0e-4
+    1000: 5.0e-5
+
+# Loss configuration
+loss:
+  method: "pot_emd"  # pot_emd, pot_sinkhorn, pot_fgw, geomloss
+  geomloss_blur: 1.0e-8
+  geomloss_scaling: 0.5
+  geomloss_reach: null
+  sinkhorn_reg: 0.1
+  fgw_alpha: 0.75
+  fgw_eps: 1.0e-6
+  ot_max_iter: null  # null or finite number
+
+  # Unbalanced Sinkhorn parameters
+  unbalanced_reg_m: 1.0
+  unbalanced_reg_div: "kl"
+
+# Training schedule
+schedule:
+  coarse_epochs: 50
+  coarse_step_size: 0.050
+  fine_step_size: 0.025
+  ode_method: "euler"
+
+# Logging and checkpointing
+logging:
+  use_wandb: true
+  wandb_project: "fgw-train250519"
+  save_every: 20
+  print_every: 10
+  print_step_loss: true
+
+# Debug mode
+debug_mode: false  # Set to true to run only 1 epoch
+
+# Evaluation settings
+evaluation:
+  enable_eval: true
+  eval_every: 10
+  eval_timepoints: [[2, 3]]
+  eval_samples: null  # null = use all samples, or set number for downsampling
+  eval_integration_method: "rk4"
+  eval_step_size: 0.01
+  radius_neighbors: 20
+
+  # Evaluation metrics control
+  eval_coverage: true
+  eval_gw: false
+  eval_label_consistency: true
+  max_gw_samples: null  # null = use all samples, or set number for GW subsampling
+  label_knn_k: 5
+
+# Training plans
+train_plans: [[2, 3]]
+
+# Gradient clipping
+gradient_clipping:
+  enabled: true
+  clip_grad_norm: 20.0
+  clip_start_epoch: 100

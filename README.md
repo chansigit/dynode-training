@@ -39,6 +39,10 @@ numpy
 pandas
 matplotlib
 
+# Configuration management
+hydra-core
+omegaconf
+
 # Single-cell analysis
 scanpy
 anndata
@@ -54,6 +58,14 @@ sklearn
 # Logging and visualization
 wandb
 tqdm
+```
+
+**Installation:**
+```bash
+pip install torch torchdiffeq hydra-core omegaconf numpy pandas matplotlib
+pip install scanpy anndata scipy scikit-learn wandb tqdm
+pip install pot  # For optimal transport
+pip install geomloss  # Optional, for additional OT methods
 ```
 
 ### Custom Modules
@@ -87,17 +99,52 @@ Paths are currently hardcoded to:
 python train.py
 ```
 
-### Configuration
-All hyperparameters are centralized in the `CONFIG` dictionary:
+### Configuration with Hydra
 
-```python
-# Key parameters to adjust
-'n_epochs': 5000,           # Training epochs
-'lr': 1e-8,                 # Learning rate
-'mini_batch_size': 1024,    # Batch size
-'loss_method': 'pot_emd',   # OT loss (pot_emd, pot_sinkhorn, pot_fgw, geomloss)
-'eval_every': 10,           # Evaluation frequency
-'debug_mode': False,        # Set True for single epoch testing
+Configuration is managed through **Hydra** with YAML files. Default settings are in `config.yaml`, and can be overridden via command line.
+
+#### Using Default Configuration
+```bash
+python train.py
+```
+
+#### Override Single Parameters
+```bash
+# Modify learning rate
+python train.py training.lr=1e-6
+
+# Change epochs and batch size
+python train.py training.n_epochs=1000 training.mini_batch_size=512
+
+# Enable debug mode (1 epoch only)
+python train.py debug_mode=true
+
+# Switch device
+python train.py device=cuda:1
+```
+
+#### Override Complex Parameters
+```bash
+# Modify evaluation timepoints
+python train.py evaluation.eval_timepoints="[[1,2],[3,4]]"
+
+# Change learning rate schedule
+python train.py training.lr_schedule="{50:1e-5,100:5e-6}"
+
+# Disable features
+python train.py logging.use_wandb=false evaluation.enable_eval=false
+```
+
+#### Useful Combinations
+```bash
+# Quick debug run
+python train.py debug_mode=true evaluation.enable_eval=false
+
+# Reduced evaluation overhead
+python train.py evaluation.eval_samples=1000 training.mini_batch_size=512
+
+# High learning rate experiment
+python train.py training.lr=1e-5 training.lr_schedule="{10:5e-6,50:1e-6}"
 ```
 
 ### Training Features
