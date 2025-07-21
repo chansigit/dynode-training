@@ -4,18 +4,26 @@ Training script with integrated evaluation for DynVelocity model v15.
 Evaluates model every few epochs during training using Coverage + Gromov-Wasserstein.
 """
 
-import os, time, math, datetime, copy, pickle, sys, logging
+import os
+import time
+import datetime
+import sys
+import logging
 from math import sqrt
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 import hydra
 
-import numpy as np, pandas as pd, matplotlib.pyplot as plt
-import scanpy as sc, anndata, torch, wandb
-from tqdm.autonotebook import tqdm
-import torchdiffeq 
+import numpy as np
+import anndata
+import torch
+import torch.nn as nn
+import torch.nn.init as init
+import wandb
 from torchdiffeq import odeint_adjoint as odeint
-from scipy.spatial.distance import cdist
+from torch.nn.utils.parametrizations import spectral_norm
 from sklearn.neighbors import NearestNeighbors
+from dynamica.sat import SpatialAttentionLayer
+from dynamica.equi import E3NNVelocityPredictor
 import ot  # For Gromov-Wasserstein
 
 # Add paths
@@ -96,7 +104,7 @@ CONFIG = {
     
     # Evaluation settings
     'enable_eval': True,  # Set to False to completely disable evaluation during training
-    'eval_every': 10,  # Evaluate every 10 epochs
+    'eval_every': 20,  # Evaluate every 10 epochs
     'eval_timepoints': [[2, 3]],
     'eval_samples': None,  # None = use all samples, or set number for downsampling
     'eval_integration_method': 'rk4',
@@ -284,11 +292,6 @@ class DictAverageMeter:
 # ================================================================================================
 # MODEL DEFINITION
 # ================================================================================================
-
-import torch.nn as nn, torch.nn.init as init
-from torch.nn.utils.parametrizations import spectral_norm
-from dynamica.sat import SpatialAttentionLayer
-from dynamica.equi import E3NNVelocityPredictor
 
 class DynVelocity(nn.Module):
     """Simplified dynamic velocity prediction model."""
@@ -478,7 +481,6 @@ def precalculate_latent_radius(data, config, logger):
     logger.info("Pre-calculating static latent radius for evaluation (per timepoint)")
     
     timepoint_radii = []
-    device = config['device']
     k = config['radius_neighbors']
     
     for timepoint_idx in range(len(data['Z_mean_list'])):
@@ -691,7 +693,7 @@ def evaluate_model(model, data, config, static_radius, logger):
         
         # Print timing information
         total_eval_time = sum(timing_info.values())
-        timing_str = f"  Eval timing: "
+        timing_str = "  Eval timing: "
         for metric, t in timing_info.items():
             timing_str += f"{metric}={t:.2f}s "
         timing_str += f"total={total_eval_time:.2f}s"
@@ -719,7 +721,6 @@ def setup_loss_function(config, logger):
         logger.info("Using geomloss for optimal transport")
         return geomloss_fn
     else:
-        import ot
         logger.info(f"Using POT method: {config['loss_method']}")
         return None
 
