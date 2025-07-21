@@ -169,3 +169,6 @@ python train.py training.lr=1e-5 training.lr_schedule="{10:5e-6,50:1e-6}"
 
 ## Change History
 - 2025-07-16: Initial commit with DynVelocity v15 training pipeline
+
+## Future plans
+[ ] add loss support for pot_partial_ot and pot_fugw
