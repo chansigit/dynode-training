@@ -22,13 +22,15 @@ import wandb
 from torchdiffeq import odeint_adjoint as odeint
 from torch.nn.utils.parametrizations import spectral_norm
 from sklearn.neighbors import NearestNeighbors
-from dynamica.sat import SpatialAttentionLayer
-from dynamica.equi import E3NNVelocityPredictor
 import ot  # For Gromov-Wasserstein
 
 # Add paths
 sys.path.append('/scratch/users/chensj16/codes/dynode_training')
 sys.path.append('/scratch/users/chensj16/codes/dynode_development')
+
+# Import custom modules after path setup
+from dynamica.sat import SpatialAttentionLayer
+from dynamica.equi import E3NNVelocityPredictor
 
 # ================================================================================================
 # CONFIGURATION

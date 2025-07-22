@@ -135,6 +135,15 @@ python train.py training.lr_schedule="{50:1e-5,100:5e-6}"
 python train.py logging.use_wandb=false evaluation.enable_eval=false
 ```
 
+#### Using Alternative Config Files
+```bash
+# Use comprehensive training plan (16 forward/reverse sequences)
+python train.py --config-name=config_full
+
+# Use custom config file
+python train.py --config-name=my_config
+```
+
 #### Useful Combinations
 ```bash
 # Quick debug run
@@ -145,6 +154,9 @@ python train.py evaluation.eval_samples=1000 training.mini_batch_size=512
 
 # High learning rate experiment
 python train.py training.lr=1e-5 training.lr_schedule="{10:5e-6,50:1e-6}"
+
+# Full bidirectional training with comprehensive sequences
+python train.py --config-name=config_full training.n_epochs=1000
 ```
 
 ### Training Features
