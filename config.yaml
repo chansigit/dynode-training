@@ -21,6 +21,7 @@ model:
   output_dim: 30
   hidden_dim: 512
   position_dim: 3
+  augmented_dim: 8  # Auxiliary dimensions for enhanced model capacity
   sigma: 100.0
   static_pos: false
   message_passing: true

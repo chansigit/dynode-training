@@ -58,6 +58,7 @@ CONFIG = {
     'output_dim': 30,
     'hidden_dim': 512,
     'position_dim': 3,
+    'augmented_dim': 8,  # Auxiliary dimensions for enhanced model capacity
     'sigma': 100.0,
     'static_pos': False,
     'message_passing': True,
@@ -155,6 +156,7 @@ def update_config_from_hydra(cfg: DictConfig) -> dict:
         'output_dim': cfg.model.output_dim,
         'hidden_dim': cfg.model.hidden_dim,
         'position_dim': cfg.model.position_dim,
+        'augmented_dim': cfg.model.augmented_dim,
         'sigma': cfg.model.sigma,
         'static_pos': cfg.model.static_pos,
         'message_passing': cfg.model.message_passing,
@@ -263,6 +265,7 @@ class DynVelocity(nn.Module):
         self.input_dim = config['input_dim']
         self.hidden_dim = config['hidden_dim']
         self.position_dim = config['position_dim']
+        self.augmented_dim = config['augmented_dim']
         self.sigma = config['sigma']
         self.message_passing = config['message_passing']
         self.static_pos = config['static_pos']
@@ -270,9 +273,10 @@ class DynVelocity(nn.Module):
         self.expr_autonomous = config['expr_autonomous']
         self.pos_autonomous = config['pos_autonomous']
 
-        # Base MLP for expression features
+        # Base MLP for expression features (now includes auxiliary features)
+        base_input_dim = self.input_dim + self.position_dim + self.augmented_dim
         self.mlp_base = nn.Sequential(
-            spectral_norm(nn.Linear(self.input_dim + self.position_dim, self.hidden_dim)), 
+            spectral_norm(nn.Linear(base_input_dim, self.hidden_dim)), 
             nn.LayerNorm(self.hidden_dim), nn.SiLU(), 
             spectral_norm(nn.Linear(self.hidden_dim, self.hidden_dim)), 
             nn.LayerNorm(self.hidden_dim), nn.SiLU(), 
@@ -283,9 +287,11 @@ class DynVelocity(nn.Module):
         
         # Spatial attention layers (optional)
         if self.message_passing:
+            # SpatialAttentionLayer input_dim parameter is for features only (not including positions)
+            spatial_feature_dim = self.input_dim + self.augmented_dim
             self.spatial_base1 = nn.Sequential(
                 SpatialAttentionLayer(
-                    input_dim=self.input_dim, p_dim=self.position_dim,
+                    input_dim=spatial_feature_dim, p_dim=self.position_dim,
                     hidden_dim=self.hidden_dim, output_dim=self.hidden_dim, 
                     residual=True, message_passing=True, sigma=self.sigma, use_softmax=False),
                 spectral_norm(nn.Linear(self.hidden_dim, self.hidden_dim)), nn.LayerNorm(self.hidden_dim), nn.SiLU(),
@@ -319,13 +325,23 @@ class DynVelocity(nn.Module):
                 scalar_hidden=128, vec3d_hidden=128, n_vec3d_out=1
             )
 
+        # Augmented velocity predictor (for augmented dimensions)
+        if self.augmented_dim > 0:
+            aug_input_dim = self.hidden_dim * 2 + (0 if self.expr_autonomous else 1)
+            self.aug_head = nn.Sequential(
+                spectral_norm(nn.Linear(aug_input_dim, self.hidden_dim)),
+                nn.LayerNorm(self.hidden_dim), nn.SiLU(),
+                spectral_norm(nn.Linear(self.hidden_dim, self.augmented_dim))
+            )
+
         self.apply(self._init_weights)
 
     def forward(self, t, state_tensor, args=None):
         """Forward pass through the model."""
-        # Parse state tensor - cleaner approach
+        # Parse augmented state tensor: [expr, pos, aug, energy]
         expr_dim = self.input_dim
         pos_dim = self.position_dim
+        aug_dim = self.augmented_dim
         
         # Remove energy dimension if present
         if self.energy_regularization:
@@ -333,20 +349,31 @@ class DynVelocity(nn.Module):
         else:
             features = state_tensor
         
-        # Split features
+        # Split features: [expr, pos, aug]
         expr_features = features[:, :expr_dim]
         pos_features = features[:, expr_dim:expr_dim + pos_dim]
         
-        # Combine for input
-        X = torch.cat([expr_features, pos_features], dim=1)
+        # Handle augmented features
+        if aug_dim > 0:
+            aug_features = features[:, expr_dim + pos_dim:expr_dim + pos_dim + aug_dim]
+        else:
+            aug_features = torch.empty(expr_features.size(0), 0, device=expr_features.device)
+        
+        # Combine all features for input (expr + pos + aug)
+        X = torch.cat([expr_features, pos_features, aug_features], dim=1)
 
         # Compute base representation
         H0 = self.mlp_base(X)
         
         # Compute spatial representation (if enabled)
         if self.message_passing:
-            H1 = self.spatial_base1(X)
-            H1 = self.spatial_base2(torch.cat([H1, pos_features], dim=1))
+            # SpatialAttentionLayer expects [features, positions] concatenated
+            spatial_features = torch.cat([expr_features, aug_features], dim=1)
+            spatial_input = torch.cat([spatial_features, pos_features], dim=1)
+            H1 = self.spatial_base1(spatial_input)
+            # spatial_base2 also needs positions concatenated
+            spatial_input2 = torch.cat([H1, pos_features], dim=1)
+            H1 = self.spatial_base2(spatial_input2)
         else:
             H1 = torch.zeros_like(H0)
         
@@ -374,12 +401,24 @@ class DynVelocity(nn.Module):
                 self.pos_head.prepare_input(pos_input, pos_features.reshape(-1, 3))
             )
 
-        # Combine velocities
-        velocity = torch.cat([feature_velo, pos_velo], dim=1)
+        # Predict augmented velocities
+        if aug_dim > 0:
+            if self.expr_autonomous:
+                aug_velo = self.aug_head(H)
+            else:
+                t_expanded = t.expand(H.size(0), 1)
+                aug_velo = self.aug_head(torch.cat([H, t_expanded], dim=1))
+        else:
+            aug_velo = torch.empty(expr_features.size(0), 0, device=expr_features.device)
+
+        # Combine velocities: [expr_velo, pos_velo, aug_velo]
+        velocity = torch.cat([feature_velo, pos_velo, aug_velo], dim=1)
         
         # Add energy if regularization is enabled
         if self.energy_regularization:
             kinetic_energy = 0.5 * (feature_velo ** 2).mean(dim=1) + 0.5 * (pos_velo ** 2).mean(dim=1)
+            if aug_dim > 0:
+                kinetic_energy += 0.5 * (aug_velo ** 2).mean(dim=1)
             velocity = torch.cat([velocity, kinetic_energy.unsqueeze(1)], dim=1)
             
         return velocity
@@ -484,10 +523,15 @@ def evaluate_model(model, data, config, static_radius, logger):
             n_samples = min(config['eval_samples'], data['Z_mean_list'][start_idx].size(0))
             sample_indices = np.random.choice(data['Z_mean_list'][start_idx].size(0), n_samples, replace=False)
         
-        # Initial state
+        # Initial state: [expr, pos, aug, energy]
         z0 = data['Z_mean_list'][start_idx][sample_indices]
         p0 = data['P_list'][start_idx][sample_indices]
         state0 = torch.cat([z0, p0], dim=1)
+        
+        # Add augmented dimensions (initialized as zeros)
+        if config['augmented_dim'] > 0:
+            aug_init = torch.zeros(state0.size(0), config['augmented_dim'], device=state0.device, dtype=state0.dtype)
+            state0 = torch.cat([state0, aug_init], dim=1)
         
         # Add energy dimension if needed
         if config['energy_regularization']:
@@ -514,13 +558,20 @@ def evaluate_model(model, data, config, static_radius, logger):
                 options={"step_size": config['eval_step_size']}
             )[-1]  # Final state
         
-        # Parse predictions
+        # Parse predictions: [expr, pos, aug, energy]
+        expr_dim = config['input_dim']
+        pos_dim = config['position_dim'] 
+        aug_dim = config['augmented_dim']
+        
         if config['energy_regularization']:
-            z_pred = predicted_states[:, :config['input_dim']].cpu().numpy()
-            p_pred = predicted_states[:, config['input_dim']:-1].cpu().numpy()
+            # Remove energy dimension (last)
+            z_pred = predicted_states[:, :expr_dim].cpu().numpy()
+            p_pred = predicted_states[:, expr_dim:expr_dim + pos_dim].cpu().numpy()
+            # aug_pred = predicted_states[:, expr_dim + pos_dim:expr_dim + pos_dim + aug_dim].cpu().numpy()  # Not used in evaluation
         else:
-            z_pred = predicted_states[:, :config['input_dim']].cpu().numpy()
-            p_pred = predicted_states[:, config['input_dim']:].cpu().numpy()
+            z_pred = predicted_states[:, :expr_dim].cpu().numpy()
+            p_pred = predicted_states[:, expr_dim:expr_dim + pos_dim].cpu().numpy()
+            # aug_pred = predicted_states[:, expr_dim + pos_dim:expr_dim + pos_dim + aug_dim].cpu().numpy()  # Not used in evaluation
         
         # Calculate velocities for velocity norm analysis
         t_eval = torch.tensor(data['T_list'][end_idx]).to(config['device'])
@@ -528,6 +579,13 @@ def evaluate_model(model, data, config, static_radius, logger):
             torch.from_numpy(z_pred).to(config['device']),
             torch.from_numpy(p_pred).to(config['device'])
         ], dim=1)
+        
+        # Add augmented dimensions (zeros for velocity calculation)
+        if config['augmented_dim'] > 0:
+            aug_for_velocity = torch.zeros(state_for_velocity.size(0), config['augmented_dim'],
+                                         device=state_for_velocity.device, 
+                                         dtype=state_for_velocity.dtype)
+            state_for_velocity = torch.cat([state_for_velocity, aug_for_velocity], dim=1)
         
         if config['energy_regularization']:
             energy_for_velocity = torch.zeros(state_for_velocity.size(0), 1, 
@@ -538,13 +596,15 @@ def evaluate_model(model, data, config, static_radius, logger):
         with torch.no_grad():
             velocities = model(t_eval, state_for_velocity)
         
-        # Parse velocities
+        # Parse velocities: [expr_velo, pos_velo, aug_velo, energy]
         if config['energy_regularization']:
-            v_expr = velocities[:, :config['input_dim']].cpu().numpy()
-            v_pos = velocities[:, config['input_dim']:-1].cpu().numpy()
+            v_expr = velocities[:, :expr_dim].cpu().numpy()
+            v_pos = velocities[:, expr_dim:expr_dim + pos_dim].cpu().numpy()
+            # v_aug = velocities[:, expr_dim + pos_dim:expr_dim + pos_dim + aug_dim].cpu().numpy()  # Not used in evaluation
         else:
-            v_expr = velocities[:, :config['input_dim']].cpu().numpy()
-            v_pos = velocities[:, config['input_dim']:].cpu().numpy()
+            v_expr = velocities[:, :expr_dim].cpu().numpy()
+            v_pos = velocities[:, expr_dim:expr_dim + pos_dim].cpu().numpy()
+            # v_aug = velocities[:, expr_dim + pos_dim:expr_dim + pos_dim + aug_dim].cpu().numpy()  # Not used in evaluation
         
         # Calculate metrics with timing
         metrics = {}
@@ -739,8 +799,15 @@ def train_step(model, optimizer, data, config, loss_fn, logger, epoch):
             idx0 = np.random.randint(0, data['P_list'][i].size(0), size=config['mini_batch_size'])
             z0, p0 = data['Z_mean_list'][i][idx0, ...], data['P_list'][i][idx0, ...]
             
-            # Combine initial state
+            # Combine initial state: [expr, pos, aug, energy]
             state0 = torch.cat([z0, p0], dim=1)
+            
+            # Add augmented dimensions (initialized as zeros)
+            if config['augmented_dim'] > 0:
+                aug_init = torch.zeros(state0.size(0), config['augmented_dim'], device=state0.device, dtype=state0.dtype)
+                state0 = torch.cat([state0, aug_init], dim=1)
+            
+            # Add energy dimension if needed
             if config['energy_regularization']:
                 energy_init = torch.zeros(state0.size(0), 1, device=state0.device, dtype=state0.dtype)
                 state0 = torch.cat([state0, energy_init], dim=1)
@@ -776,14 +843,20 @@ def train_step(model, optimizer, data, config, loss_fn, logger, epoch):
             for j in range(state_predictions.size(0)):
                 pred_state = state_predictions[j]
                 
-                # Parse prediction
+                # Parse prediction: [expr, pos, aug, energy]
+                expr_dim = config['input_dim']
+                pos_dim = config['position_dim']
+                aug_dim = config['augmented_dim']
+                
                 if config['energy_regularization']:
-                    z1_pred = pred_state[:, :config['input_dim']]
-                    p1_pred = pred_state[:, config['input_dim']:-1]
+                    z1_pred = pred_state[:, :expr_dim]
+                    p1_pred = pred_state[:, expr_dim:expr_dim + pos_dim]
+                    # aug_pred = pred_state[:, expr_dim + pos_dim:expr_dim + pos_dim + aug_dim]  # Not used in loss
                     kenergy = torch.abs(torch.mean(pred_state[:, -1]))
                 else:
-                    z1_pred = pred_state[:, :config['input_dim']]
-                    p1_pred = pred_state[:, config['input_dim']:]
+                    z1_pred = pred_state[:, :expr_dim]
+                    p1_pred = pred_state[:, expr_dim:expr_dim + pos_dim]
+                    # aug_pred = pred_state[:, expr_dim + pos_dim:expr_dim + pos_dim + aug_dim]  # Not used in loss
                     kenergy = torch.tensor(0.0, device=pred_state.device)
                 
                 # Combine for loss computation
@@ -1066,9 +1139,13 @@ def main(cfg: DictConfig):
         if epoch % CONFIG['save_every'] == 0:
             model_path = os.path.join(CONFIG['save_path'], f'dyn_velocity-{run_name}-E{epoch}-v15.pt')
             optimizer_path = os.path.join(CONFIG['save_path'], f'optimizer-{run_name}-E{epoch}-v15.pt')
-            torch.save(dyn_velocity.state_dict(), model_path)
-            torch.save(optimizer.state_dict(), optimizer_path)
-            logger.info(f"Checkpoint saved: {model_path}")
+            try:
+                torch.save(dyn_velocity.state_dict(), model_path)
+                torch.save(optimizer.state_dict(), optimizer_path)
+                logger.info(f"Checkpoint saved: {model_path}")
+            except Exception as e:
+                logger.warning(f"Failed to save checkpoint at epoch {epoch}: {e}")
+                logger.info("Training will continue without saving this checkpoint")
         
         # Increase epoch
         epoch += 1
