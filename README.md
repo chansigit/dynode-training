@@ -134,6 +134,11 @@ python train.py ~training.lr_schedule '+training.lr_schedule={10:1e-4,20:1e-5,10
 # Disable lr scheduling completely
 python train.py ~training.lr_schedule
 
+# Set training plans (timepoint sequences)
+python train.py 'train_plans=[[0,1,2,3]]'  # Single sequence
+python train.py 'train_plans=[[0,1,2,3],[1,2,3,4]]'  # Multiple sequences
+python train.py 'train_plans=[[0,1,2,3,4],[4,3,2,1,0]]'  # Forward + reverse
+
 # Disable features
 python train.py logging.use_wandb=false evaluation.enable_eval=false
 ```
