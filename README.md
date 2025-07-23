@@ -128,8 +128,11 @@ python train.py device=cuda:1
 # Modify evaluation timepoints
 python train.py evaluation.eval_timepoints="[[1,2],[3,4]]"
 
-# Change learning rate schedule
-python train.py training.lr_schedule="{50:1e-5,100:5e-6}"
+# Change learning rate schedule (complete replacement)
+python train.py ~training.lr_schedule '+training.lr_schedule={10:1e-4,20:1e-5,100:1e-9}'
+
+# Disable lr scheduling completely
+python train.py ~training.lr_schedule
 
 # Disable features
 python train.py logging.use_wandb=false evaluation.enable_eval=false
