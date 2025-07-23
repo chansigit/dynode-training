@@ -596,8 +596,10 @@ def train_step(model, optimizer, data, config, loss_fn, logger, epoch):
     total_losses = []
     ot_losses = []
     kenergies = []
+    step_times = []
     
     for inds in config['train_plans']:
+        step_start_time = time.time()
         optimizer.zero_grad()
         
         try:
@@ -696,6 +698,7 @@ def train_step(model, optimizer, data, config, loss_fn, logger, epoch):
             total_losses.append(total_loss.item())
             ot_losses.append(ot_loss.item())
             kenergies.append(kenergy.item())
+            step_times.append(time.time() - step_start_time)
             
             # Print step-level progress (if enabled)
             if config['print_step_loss']:
@@ -710,16 +713,22 @@ def train_step(model, optimizer, data, config, loss_fn, logger, epoch):
         avg_total_loss = np.mean(total_losses)
         avg_ot_loss = np.mean(ot_losses)
         avg_kenergy = np.mean(kenergies)
+        avg_step_time = np.mean(step_times)
         reg_ratio = config['energy_lambda'] * avg_kenergy / avg_ot_loss if avg_ot_loss > 0 else 0
+        
+        # Print average step time if print_step_loss is enabled
+        if config['print_step_loss']:
+            print(f"Epoch average step time: {avg_step_time:.3f}s")
         
         return {
             'total_loss': avg_total_loss,
             'ot_loss': avg_ot_loss,
             'kenergy': avg_kenergy,
-            'reg_ratio': reg_ratio
+            'reg_ratio': reg_ratio,
+            'avg_step_time': avg_step_time
         }
     else:
-        return {'total_loss': 0, 'ot_loss': 0, 'kenergy': 0, 'reg_ratio': 0}
+        return {'total_loss': 0, 'ot_loss': 0, 'kenergy': 0, 'reg_ratio': 0, 'avg_step_time': 0}
 
 # ================================================================================================
 # MAIN TRAINING LOOP
