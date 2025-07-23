@@ -23,11 +23,7 @@ from torch.nn.utils.parametrizations import spectral_norm
 from sklearn.neighbors import NearestNeighbors
 import ot  # For Gromov-Wasserstein
 
-# Add paths
-sys.path.append('/scratch/users/chensj16/codes/dynode_training')
-sys.path.append('/scratch/users/chensj16/codes/dynode_development')
-
-# Import custom modules after path setup
+# Import custom modules (now local)
 from dynamica.sat import SpatialAttentionLayer
 from dynamica.equi import E3NNVelocityPredictor
 
