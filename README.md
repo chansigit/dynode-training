@@ -84,7 +84,7 @@ Paths are currently hardcoded to:
 ## Data Format
 
 ### Input Data Structure
-- **File**: `adata_list.v250715.pt` (PyTorch tensor file)
+- **File**: `adata_list.v250715.pt` (list of AnnData objects stored in .pt file using torch.save)
 - **Format**: List of AnnData objects, one per timepoint
 - **Required keys**:
   - `adata.obsm['Z_mean']`: Gene expression embeddings (30D)

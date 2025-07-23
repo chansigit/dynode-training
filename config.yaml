@@ -21,7 +21,7 @@ model:
   output_dim: 30
   hidden_dim: 512
   position_dim: 3
-  augmented_dim: 8  # Auxiliary dimensions for enhanced model capacity
+  augmented_dim: 30  # Auxiliary dimensions for enhanced model capacity
   sigma: 100.0
   static_pos: false
   message_passing: true
@@ -86,6 +86,7 @@ evaluation:
   eval_integration_method: "rk4"
   eval_step_size: 0.01
   radius_neighbors: 20
+  preset_radius: 0.3102  # Use preset radius instead of calculating (null = auto-calculate)
 
   # Evaluation metrics control
   eval_coverage: true
@@ -102,3 +103,4 @@ gradient_clipping:
   enabled: true
   clip_grad_norm: 20.0
   clip_start_epoch: 100
+
